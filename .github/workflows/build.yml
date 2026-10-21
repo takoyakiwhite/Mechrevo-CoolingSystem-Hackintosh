@@ -13,7 +13,7 @@ jobs:
       - name: Toolchain
         run: swift --version && xcodebuild -version
 
-      - name: Build (universal: arm64 + x86_64)
+      - name: Build universal (arm64 + x86_64)
         run: |
           set -o pipefail
           swift build -c release --arch arm64 --arch x86_64 2>&1 | tail -40
@@ -24,7 +24,7 @@ jobs:
           BIN=$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/wcooler
           ls -l "$BIN"
           lipo -info "$BIN"
-          # 冒烟测试：没有蓝牙权限/没有设备时也应正常打印用法或状态并退出
+          # 冒烟测试：无蓝牙权限/无设备时也应正常打印用法并退出
           "$BIN" --help || true
 
       - name: Package
