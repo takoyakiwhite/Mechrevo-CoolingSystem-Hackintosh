@@ -14,6 +14,9 @@
 | 水冷魔盒本体（水泵档位/风扇/灯效/流量） | **BLE 外设**，Nordic UART Service 透传 | ✅ 用户态 CoreBluetooth 即可 |
 | 机身功耗墙 / 风扇曲线 / 性能模式 | Windows **WMI 邮箱**：`root\wmi` 的 `OemWMIMethod!OemWMIfun`（回退 `AcpiTest_WMI`，in 64B / out 256B），例如 `set_cpu_spl = [0,251,0,23,2,<W>]` | ❌ macOS 没有 WMI，需 SSDT/kext |
 
+机身功耗墙 / 风扇曲线 / 性能模式的 macOS 可行方案（含本机实测参数）见
+[`POWER-AND-FANS.md`](POWER-AND-FANS.md)。
+
 也就是说：**「连接水冷」这个效果 90% 是蓝牙**，跟 open-revo 一样用 BLE 控制魔盒即可；
 剩下那 285W 之类的功耗墙加成，基本是 EC/固件自己检测到水管接上后放开的
 （建议在 Windows 上关掉 open-revo 插拔水管，用 HWiNFO 看 PL1/PL2 是否变化来验证；
