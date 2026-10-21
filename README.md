@@ -69,6 +69,10 @@ swift build -c release
 不想本机装 Xcode 的话，本仓库带 GitHub Actions（`.github/workflows/build.yml`），
 推上去由 macos runner 编出 `arm64 + x86_64` 通用二进制，产物在 Actions 的 artifact 里。
 
+已构建好的产物：`dist/wcooler-macos-universal.zip`（也可以在
+<https://github.com/takoyakiwhite/wcooler-macos/actions> 的 artifact 里下）。
+下载后：`unzip wcooler-macos-universal.zip && chmod +x wcooler && ./wcooler scan`。
+
 常驻：把 `wcooler run ...` 包一层 `launchd` agent（`KeepAlive=true`）即可开机自启、崩溃自拉。
 
 ## 5. 黑苹果前置条件
