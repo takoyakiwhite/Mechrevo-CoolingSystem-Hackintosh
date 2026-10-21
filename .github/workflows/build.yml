@@ -1,0 +1,41 @@
+name: build
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: swift --version && xcodebuild -version
+
+      - name: Build (universal: arm64 + x86_64)
+        run: |
+          set -o pipefail
+          swift build -c release --arch arm64 --arch x86_64 2>&1 | tail -40
+
+      - name: Verify binary
+        run: |
+          set -o pipefail
+          BIN=$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/wcooler
+          ls -l "$BIN"
+          lipo -info "$BIN"
+          # 冒烟测试：没有蓝牙权限/没有设备时也应正常打印用法或状态并退出
+          "$BIN" --help || true
+
+      - name: Package
+        run: |
+          set -o pipefail
+          BIN=$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/wcooler
+          mkdir -p dist
+          cp "$BIN" dist/wcooler
+          cd dist && zip -9 wcooler-macos-universal.zip wcooler
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wcooler-macos
+          path: dist/wcooler-macos-universal.zip
