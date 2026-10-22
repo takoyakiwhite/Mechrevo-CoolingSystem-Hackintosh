@@ -28,6 +28,20 @@ final class AppModel: ObservableObject {
     /// 「可用传感器」扫描结果
     @Published var sensors: [(key: String, celsius: Double)] = []
 
+    /// 「控制温度」究竟来自哪个传感器，直接标出来，免得和后面的原始读数混淆
+    var controlSourceLabel: String? {
+        guard smart.inputIsTemp else { return nil }
+        switch settings.cfg.tempSource {
+        case .cpu: return "仅 CPU"
+        case .gpu: return "仅 GPU"
+        case .hottest:
+            if let c = smart.cpuTemp, let g = smart.gpuTemp {
+                return c >= g ? "来自 CPU" : "来自 GPU"
+            }
+            return nil
+        }
+    }
+
     /// 当前输入归一化到 0~100 后的值，用于在曲线图上标出当前位置
     var normalizedInput: Double? {
         let cfg = settings.cfg
@@ -95,7 +109,7 @@ final class AppModel: ObservableObject {
         case .meterNormal:
             break
         case .overheat(let v):
-            Notifier.notify(title: "🔥 高温保护已触发", body: v)
+            Notifier.notify(title: "高温保护已触发", body: v)
         }
     }
 
@@ -115,7 +129,7 @@ final class AppModel: ObservableObject {
                 let msg = String(format: "输入 %.0f%@ ≥ 阈值 %.0f%@，已强制泵 100%% + 扇 100%%",
                                  value, unit, cfg.overheatThreshold, unit)
                 log(msg)
-                Notifier.notify(title: "水冷魔盒：高温保护", body: msg)
+                handle(.overheat(value: msg))      // 统一走事件分发，别在这里单独弹
             }
             return true
         }
@@ -145,7 +159,7 @@ final class AppModel: ObservableObject {
 
     private func tick() {
         let cfg = settings.cfg
-        guard cfg.smartEnabled else { return }
+        guard cfg.smartEnabled else { smart.refreshLoad(); return }
         let r = smart.evaluate(cfg: cfg)
         if checkOverheat(cfg, value: smart.inputValue) { return }
         guard r.changed else { return }
@@ -181,13 +195,14 @@ final class AppModel: ObservableObject {
 
     func pushCurrent() {
         let cfg = settings.cfg
+        // 风扇灯帧始终下发（含 off）：只在 on 时发的话，关灯后设备会维持上次状态
         if cfg.smartEnabled {
             let r = smart.evaluate(cfg: cfg)
             engine.apply(pumpDuty: r.pump, volt: cfg.volt, fanDuty: r.fan,
-                         head: cfg.headLED, fan: cfg.fanLED.on ? cfg.fanLED : nil)
+                         head: cfg.headLED, fan: cfg.fanLED)
         } else {
             engine.apply(pumpDuty: cfg.manualPumpDuty, volt: cfg.volt, fanDuty: cfg.manualFanDuty,
-                         head: cfg.headLED, fan: cfg.fanLED.on ? cfg.fanLED : nil)
+                         head: cfg.headLED, fan: cfg.fanLED)
         }
     }
 
@@ -204,6 +219,11 @@ final class AppModel: ObservableObject {
     /// SMC 通道在不少黑苹果上不可用，所以只能靠外部命令；没装就回退 CPU 负载。
     func detectTemperatureSource(report: Bool = true) {
         guard settings.cfg.useTemperature else { return }
+        // SMC 能用就别费劲去 shell 里试 6 条命令（每条最多 2.5 秒）
+        if settings.cfg.preferSMC && SMCReader.shared.available {
+            if report { engine.appendLog("温度源：原生 SMC 可用，无需外部命令") }
+            return
+        }
         if !settings.cfg.tempCommand.isEmpty && !report { return }
         DispatchQueue.global(qos: .utility).async {
             let found = TempProbe.detect()
@@ -323,10 +343,13 @@ struct ContentView: View {
                         .font(.caption).foregroundColor(dim)
                         .help("版本串首位即世代：2.x = LCT22002(Mk2)，1.x = LCT21001(Mk1)")
                 }
-                Text(model.engine.isMk2 ? "Mk2" : "Mk1")
-                    .font(.caption2).foregroundColor(dim)
-                    .help(model.engine.isMk2 ? "LCT22002：支持风扇灯效 0x33"
-                                             : "LCT21001：固件不支持风扇灯效 0x33")
+                // 只在拿到固件版本后显示机型 —— 未连接时 isMk2 是默认值，显示出来是误导
+                if model.engine.firmware != nil {
+                    Text(model.engine.isMk2 ? "Mk2" : "Mk1")
+                        .font(.caption2).foregroundColor(dim)
+                        .help(model.engine.isMk2 ? "LCT22002：支持风扇灯效 0x33"
+                                                 : "LCT21001：固件不支持风扇灯效 0x33")
+                }
             }
             HStack(spacing: 10) {
                 meterTag
@@ -385,16 +408,40 @@ struct ContentView: View {
                 HStack(spacing: 2) {
                     // 单位单独用常规字体：℃ 是 U+2103（CJK 兼容字符），
                     // 等宽字体 SF Mono 里没有这个字形，会被渲染成空白。
-                    Text(model.smart.inputIsTemp ? "温度" : "CPU")
+                    Text(model.smart.inputIsTemp ? "控制温度" : "CPU")
                         .font(.caption2).foregroundColor(dim)
                     Text(String(format: "%.0f", model.smart.inputValue))
                         .font(.system(.callout, design: .monospaced))
                     Text(model.smart.inputIsTemp ? "°C" : "%")
                         .font(.callout)
+                    if let src = model.controlSourceLabel {
+                        Text(src).font(.caption2).foregroundColor(dim)
+                    }
+                }
+                .help("「控制温度」= 真正驱动泵/扇曲线的那个数值，由「温度取自」决定"
+                      + "（默认取 CPU 与 GPU 的较高值）；后面两个是各自的原始读数。"
+                      + "它会被映射到 45~95℃ 区间，再查曲线得出泵/扇占空比。")
+
+                // 温度与占用率分开一行列出；GPU 占用率本机拿不到，如实标注
+                HStack(spacing: 10) {
+                    if let c = model.smart.cpuTemp {
+                        Text(String(format: "CPU %.0f°C %.0f%%", c, model.smart.cpuLoad))
+                            .font(.caption).foregroundColor(dim)
+                    } else {
+                        Text(String(format: "CPU 负载 %.0f%%", model.smart.cpuLoad))
+                            .font(.caption).foregroundColor(dim)
+                    }
+                    if let g = model.smart.gpuTemp {
+                        Text(String(format: "GPU %.0f°C", g))
+                            .font(.caption).foregroundColor(dim)
+                    }
                     Spacer()
                     Text("目标 泵 \(model.smart.targetPump)% · 扇 \(model.smart.targetFan)%")
-                        .font(.caption2).foregroundColor(dim)
+                        .font(.caption).foregroundColor(dim)
                 }
+                .help("CPU 占用率来自 host_cpu_load_info。"
+                      + "GPU 占用率本机拿不到：nullmoth 驱动未暴露利用率，"
+                      + "需要一个 root 守护进程轮询寄存器才行。")
                 Picker("", selection: Binding(
                     get: { model.settings.cfg.preset },
                     set: { model.settings.applyPreset($0) }
@@ -641,7 +688,14 @@ struct ContentView: View {
                    isOn: $model.settings.cfg.useTemperature
                     .onChangeCompat { on in if on { model.detectTemperatureSource() } })
             if model.settings.cfg.useTemperature {
-                Text("输入源：\(model.smart.tempSourceName)")
+                HStack {
+                    Text("温度取自").font(.caption2)
+                    Picker("", selection: $model.settings.cfg.tempSource) {
+                        ForEach(TempSource.allCases) { Text($0.label).tag($0) }
+                    }
+                    .pickerStyle(.segmented).labelsHidden()
+                }
+                Text("当前：\(model.smart.tempSourceName)")
                     .font(.caption2).foregroundColor(dim).lineLimit(2)
                 Toggle("优先用原生 SMC 读取（免 root）", isOn: $model.settings.cfg.preferSMC)
                 if !model.settings.cfg.preferSMC {

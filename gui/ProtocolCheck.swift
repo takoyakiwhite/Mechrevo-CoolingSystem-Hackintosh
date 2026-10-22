@@ -62,10 +62,11 @@ if let (t, key) = SMCReader.shared.cpuTemperature() {
 } else {
     print("原生 SMC 读不到 CPU 温度（回退外部命令 / CPU 负载）")
 }
-if let (g, gk) = SMCReader.shared.gpuTemperature() {
-    print(String(format: "✅ 原生 SMC GPU 温度：%.2f°C（键 %@）", g, gk))
+// GPU 温度不在 SMC 里 —— 在 nullmoth 驱动 NVAccel 的 PerformanceStatistics["Temperature(C)"]
+if let g = GPUReader.shared.gpuTemperature() {
+    print(String(format: "✅ NVAccel GPU 温度：%.0f°C", g))
 } else {
-    print("原生 SMC 无 GPU 温度键（N 卡 / 无 SMCSuperIO 时正常）")
+    print("读不到 GPU 温度（未装 nullmoth 驱动，或驱动未暴露 Temperature(C)）")
 }
 
 exit(failures == 0 ? 0 : 1)

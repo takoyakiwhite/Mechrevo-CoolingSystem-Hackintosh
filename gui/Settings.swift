@@ -84,10 +84,24 @@ enum Preset: String, CaseIterable, Identifiable, Codable {
     }
 }
 
+/// 温度取自哪个器件。本机 CPU 与 GPU 都能读到，一般取两者较高值最稳妥 ——
+/// 水冷主要压 CPU，但 GPU 发热同样会把整机温度拉起来。
+enum TempSource: String, Codable, CaseIterable, Identifiable {
+    case hottest, cpu, gpu
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .hottest: return "CPU/GPU 取高"
+        case .cpu: return "仅 CPU"
+        case .gpu: return "仅 GPU"
+        }
+    }
+}
+
 // MARK: - 配置
 
 struct Config: Codable, Equatable {
-    var volt: Int = 8                       // 7 / 8 / 11 / 12
+    var volt: Int = 8                       // 只允许 7 / 8 / 11（本机上限 11V）
     var smartEnabled: Bool = true
     var preset: Preset = .balanced
     var pumpCurve: Curve = Preset.balanced.pumpCurve
@@ -105,8 +119,11 @@ struct Config: Codable, Equatable {
     var fanLED: LEDSetting = LEDSetting(on: false, r: 0, g: 80, b: 255, mode: 2)
 
     /// 智能控制的输入源：false = CPU 负载，true = 温度。
-    /// 默认开：本机已实测原生 SMC 能读到 CPU 温度；读不到时会自动回退到 CPU 负载。
+    /// 默认开：本机已实测 CPU（SMC）与 GPU（NVAccel）都能读到；
+    /// 两边都读不到时会自动回退到 CPU 负载。
     var useTemperature: Bool = true
+    /// 温度取哪个器件（默认取 CPU/GPU 较高值）
+    var tempSource: TempSource = .hottest
     /// 温度优先用原生 SMC 读取（零依赖、免 root）；关掉则只用下面的外部命令
     var preferSMC: Bool = true
     /// 例如 `osx-cpu-temp -c`；输出里的第一个数字会被当作摄氏度。
@@ -335,6 +352,14 @@ final class SmartController: ObservableObject {
     @Published var inputIsTemp = false
     /// 当前实际使用的输入源，界面上直接显示，方便确认到底在按什么控制
     @Published var tempSourceName = "CPU 负载"
+    /// 分别记录 CPU / GPU 温度，界面上分开显示
+    @Published var cpuTemp: Double?
+    @Published var gpuTemp: Double?
+    @Published var cpuKey: String?
+    @Published var gpuKey: String?
+    /// CPU 占用率（0~100）。GPU 占用率目前拿不到：nullmoth 驱动未暴露利用率，
+    /// 需要一个 root 守护进程轮询 0x20802096 才行（见上游 PR #323 的说明）。
+    @Published var cpuLoad: Double = 0
     @Published var targetPump = 0
     @Published var targetFan = 0
 
@@ -343,17 +368,41 @@ final class SmartController: ObservableObject {
     private var lastPump = -999
     private var lastFan = -999
 
+    /// 手动模式下不会调用 evaluate，但界面仍要显示 CPU 占用率，这里单独刷新
+    func refreshLoad() { cpuLoad = cpu.load() }
+
     /// 采样输入并算出目标占空比；返回是否值得下发
     func evaluate(cfg: Config) -> (pump: Int, fan: Int, changed: Bool) {
         var normalized: Double
-        // 温度优先级：原生 SMC（零依赖）> 用户配置的外部命令 > 回退 CPU 负载
+        // CPU 负载每轮只采样一次：CPUMonitor 靠两次快照做差，重复调用会得到 0
+        cpuLoad = cpu.load()
+        // 温度取值链：CPU(SMC) / GPU(NVAccel) → 外部命令 → 回退 CPU 负载
         var celsius: Double? = nil
-        if cfg.useTemperature && cfg.preferSMC {
-            if let (t, key) = SMCReader.shared.cpuTemperature() {
-                celsius = t
-                tempSourceName = "SMC \(key)"
+        // 注意别叫 cpu/gpu —— 会和 CPUMonitor 实例属性同名，把它遮蔽掉
+        let cpuT = (cfg.useTemperature && cfg.preferSMC) ? SMCReader.shared.cpuTemperature() : nil
+        let gpuT = cfg.useTemperature ? GPUReader.shared.gpuTemperature() : nil
+
+        cpuTemp = cpuT?.0
+        gpuTemp = gpuT
+        cpuKey = cpuT?.1
+        gpuKey = gpuT == nil ? nil : "NVAccel"
+
+        if cfg.useTemperature {
+            switch cfg.tempSource {
+            case .cpu:     celsius = cpuT?.0 ?? gpuT
+            case .gpu:     celsius = gpuT ?? cpuT?.0
+            case .hottest:
+                if let c = cpuT?.0, let g = gpuT { celsius = max(c, g) }
+                else { celsius = cpuT?.0 ?? gpuT }
+            }
+            if celsius != nil {
+                var parts: [String] = []
+                if let c = cpuT?.0, let k = cpuT?.1 { parts.append(String(format: "%@ %.0f°C", k, c)) }
+                if let g = gpuT { parts.append(String(format: "GPU %.0f°C", g)) }
+                tempSourceName = parts.joined(separator: " · ")
             }
         }
+
         if celsius == nil, cfg.useTemperature, !cfg.tempCommand.isEmpty,
            let t = probe.celsius(cfg.tempCommand) {
             celsius = t
@@ -366,7 +415,7 @@ final class SmartController: ObservableObject {
             normalized = (c - cfg.tempMin) / span * 100.0
         } else {
             inputIsTemp = false
-            inputValue = cpu.load()
+            inputValue = cpuLoad                 // 开头已采样，别再调一次 load()
             normalized = inputValue
             tempSourceName = cfg.useTemperature ? "CPU 负载（温度不可用）" : "CPU 负载"
         }

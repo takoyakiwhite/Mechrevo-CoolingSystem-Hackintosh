@@ -114,10 +114,27 @@ open dist/WCooler.app
 > 类型 `sp78` 的值 = `Int16(raw)/256`。其它尺寸/偏移一律 `kIOReturnBadArgument`。
 > 想自己验一遍：`sh gui/check.sh` 会打印实时 CPU 温度。
 
-**GPU 温度读不到**——本机是 N 卡，macOS 下完全没有温度传感器通道（`TG0P` 等键不存在），
-且没有装 `SMCSuperIO`。所以只能用 CPU 温度驱动；界面里也写明了这一点。
+**CPU 与 GPU 的负载：** CPU 占用率可读（`host_cpu_load_info`，界面实时显示）。
+**GPU 占用率读不到** —— nullmoth 驱动没有暴露利用率，上游 PR #323 的作者也明确说明
+需要另写一个 root 守护进程去轮询寄存器（`0x20802096`），目前没人实现。所以界面上
+GPU 只显示温度，不显示利用率，不会拿假数据充数。
 
-**内存温度也读不到。** 实测扫了一遍 `TM0P/TM1P/TM0S/TM1S/TM0D/Tm0P/…` 全部无键。
+**GPU 温度也能读到 —— 但不在 SMC 里。** 这条路是查
+[nullmoth/nvidia-macos-driver#323](https://github.com/nullmoth/nvidia-macos-driver/pull/323)
+才发现的：开源 NVIDIA 驱动把 GPU 核心温度放在 **`NVAccel` 的 IORegistry 属性**
+`PerformanceStatistics["Temperature(C)"]` 里，正是 iStat 读 GPU 面板用的那个键。
+（驱动内部 250ms 读一次 TSENS，BAR0 偏移 `0x20460`，并做 1~125℃ 校验。）
+
+> 注意：SMC 里的 `TG0P/TG0D/…` 在黑苹果上**根本没有**，所以只在 SMC 里扫键会误判成
+> 「GPU 读不到」。本机实测 nullmoth 驱动 2.5.1：`Temperature(C)` = 47~48℃（待机）。
+>
+> 那个 PR 本身已关闭，但已安装的 2.5.1 驱动已经带这个功能（可能是另一笔提交合入的）。
+
+温度可取自 **CPU / GPU / 两者较高值**（默认取较高值）：
+水冷主要压 CPU，但 GPU 发热同样会把整机温度拉起来，取高值最稳。
+界面会分别显示 CPU 与 GPU 的当前温度。
+
+**内存温度确实读不到。** 实测扫了一遍 `TM0P/TM1P/TM0S/TM1S/TM0D/Tm0P/…` 全部无键。
 原因有二：没装 `SMCSuperIO`（它才提供 CPU 之外的传感器），而且笔记本 DDR5 在黑苹果上
 本来就没有 SMC 温度映射 —— 真机上有的内存传感器是靠 SMC 固件提供的，黑苹果没有。
 

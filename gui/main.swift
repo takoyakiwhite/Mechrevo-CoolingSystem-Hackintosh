@@ -94,7 +94,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         b.image = NSImage(systemSymbolName: name, accessibilityDescription: "水冷魔盒")
         b.contentTintColor = color
-        b.title = e.state == .connected ? " \(e.pumpDuty)%" : ""
+        // 菜单栏寸土寸金：显示控制温度比显示泵占空比更有信息量（后者在面板里能看到）
+        b.title = (e.state == .connected && model.smart.inputIsTemp)
+            ? String(format: " %.0f°", model.smart.inputValue) : ""
     }
 
     /// 右键快捷菜单：不展开面板也能切预设 / 注水 / 复位
@@ -113,7 +115,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         m.addItem(presets)
         m.addItem(NSMenuItem.separator())
         m.addItem(NSMenuItem(title: "注水/排气", action: #selector(doPrime(_:)), keyEquivalent: ""))
-        m.addItem(NSMenuItem(title: "请求遥测", action: #selector(doTelemetry(_:)), keyEquivalent: ""))
+        m.addItem(NSMenuItem(title: "0x30 探测", action: #selector(doTelemetry(_:)), keyEquivalent: ""))
         m.addItem(NSMenuItem(title: "复位所有输出", action: #selector(doReset(_:)), keyEquivalent: ""))
         m.addItem(NSMenuItem(title: "重连", action: #selector(doReconnect(_:)), keyEquivalent: ""))
         m.addItem(NSMenuItem.separator())

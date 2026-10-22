@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 TMP=$(mktemp -d)
 cp gui/ProtocolCheck.swift "$TMP/main.swift"
 swiftc -O -swift-version 5 -target "$(uname -m)-apple-macosx11.0" \
-  gui/Protocol.swift gui/CoolerEngine.swift gui/SMCReader.swift gui/Settings.swift "$TMP/main.swift" \
+  gui/Protocol.swift gui/CoolerEngine.swift gui/SMCReader.swift gui/GPUReader.swift gui/Settings.swift "$TMP/main.swift" \
   -o "$TMP/pc"
 "$TMP/pc"
 rm -rf "$TMP"
