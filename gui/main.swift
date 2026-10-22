@@ -28,7 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             rootView: ContentView().environmentObject(model))
 
         iconTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.updateIcon(); self?.syncPopoverSize() }
+            self?.updateIcon(); self?.syncPopoverSize()
         }
 
         NSWorkspace.shared.notificationCenter.addObserver(

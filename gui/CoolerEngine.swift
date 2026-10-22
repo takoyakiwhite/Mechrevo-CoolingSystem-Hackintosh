@@ -565,7 +565,7 @@ final class CoolerEngine: NSObject, ObservableObject,
     private func startKeepAlive() {
         keepAlive?.invalidate()
         keepAlive = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.pushState(tag: "keepalive") }
+            self?.pushState(tag: "keepalive")
         }
     }
 
@@ -627,10 +627,10 @@ final class CoolerEngine: NSObject, ObservableObject,
 
     // MARK: 工具
 
+    /// 延时执行。定时器/回调本来就在主队列上，不需要再包一层 Task ——
+    /// 包了反而会在新版 Swift 下报「concurrently-executing code 里引用捕获的 self」。
     private func after(_ s: Double, _ block: @escaping () -> Void) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + s) {
-            Task { @MainActor in block() }
-        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + s, execute: DispatchWorkItem(block: block))
     }
 
     private func log(_ s: String) { appendLog(s) }
