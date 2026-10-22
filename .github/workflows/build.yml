@@ -5,7 +5,17 @@ on:
   workflow_dispatch:
 
 jobs:
-  macos:
+  # 协议一致性回归：改了帧编码必须能在这里被抓出来
+  protocol-check:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: swift --version
+      - name: 协议一致性检查
+        run: sh gui/check.sh
+
+  cli:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -37,5 +47,23 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: wcooler-macos
+          name: wcooler-cli
           path: dist/wcooler-macos-universal.zip
+
+  app:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build universal menu bar app
+        run: sh gui/build-universal.sh
+
+      - name: Package
+        run: |
+          set -o pipefail
+          cd dist && zip -9 -r WCooler-app.zip WCooler.app
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WCooler-app
+          path: dist/WCooler-app.zip
