@@ -4,9 +4,7 @@
 set -e
 cd "$(dirname "$0")/.."
 
-# 文件名保持 ASCII：zip 会弄坏中文文件名。中文名靠 Info.plist 的
-# CFBundleDisplayName 生效（Finder / 权限弹窗 / 关于 都显示「水冷魔盒」）
-APP="dist/WCooler.app"
+APP="dist/水冷魔盒.app"
 SRCS="gui/Protocol.swift gui/CoolerEngine.swift gui/SMCReader.swift gui/GPUReader.swift gui/Settings.swift gui/Views.swift gui/main.swift"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT

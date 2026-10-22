@@ -59,9 +59,7 @@ jobs:
         run: sh gui/build-universal.sh
 
       - name: Package
-        run: |
-          set -o pipefail
-          cd dist && zip -9 -r WCooler-app.zip WCooler.app
+        run: sh gui/package.sh
 
       - uses: actions/upload-artifact@v4
         with:
